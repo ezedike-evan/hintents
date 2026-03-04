@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+const validKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+
 func newRetryHTTPClient() *http.Client {
 	cfg := RetryConfig{
 		MaxRetries:         2,
