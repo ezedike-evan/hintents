@@ -232,6 +232,40 @@ func createTestLedgerKey(t *testing.T, seed int) string {
 	return base64.StdEncoding.EncodeToString(xdrBytes)
 }
 
+// TestVerifyLedgerEntries_InvalidKeyXDR verifies that VerifyLedgerEntries rejects a
+// key whose base64 content is not valid XDR even when it is present in the returned
+// entries map.  This covers the validateLedgerKeyXDR path introduced in the Protocol V2
+// standardization, which replaces the previous self-comparison call
+// VerifyLedgerEntryHash(key, key) that made the intent unclear.
+func TestVerifyLedgerEntries_InvalidKeyXDR(t *testing.T) {
+	// Valid base64 encoding of bytes that are not valid XDR.
+	invalidXDRKey := base64.StdEncoding.EncodeToString([]byte("not valid xdr data"))
+	returnedEntries := map[string]string{
+		invalidXDRKey: "some_entry_xdr_value",
+	}
+
+	err := VerifyLedgerEntries([]string{invalidXDRKey}, returnedEntries)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to unmarshal")
+}
+
+// TestValidateLedgerKeyXDR_ValidKey verifies that the private validateLedgerKeyXDR
+// helper accepts a well-formed key (exercised indirectly via VerifyLedgerEntryHash).
+func TestValidateLedgerKeyXDR_ValidKey(t *testing.T) {
+	key := createTestLedgerKey(t, 42)
+	// VerifyLedgerEntryHash delegates to validateLedgerKeyXDR after the equality check.
+	err := VerifyLedgerEntryHash(key, key)
+	assert.NoError(t, err)
+}
+
+// TestValidateLedgerKeyXDR_InvalidBase64 verifies that the private validateLedgerKeyXDR
+// helper rejects strings that are not valid base64 (exercised indirectly).
+func TestValidateLedgerKeyXDR_InvalidBase64(t *testing.T) {
+	err := VerifyLedgerEntryHash("!!!not-base64!!!", "!!!not-base64!!!")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to decode")
+}
+
 // BenchmarkVerifyLedgerEntryHash benchmarks the hash verification performance
 func BenchmarkVerifyLedgerEntryHash(b *testing.B) {
 	key := createTestLedgerKey(&testing.T{}, 1)

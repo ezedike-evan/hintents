@@ -31,6 +31,22 @@ func TestClient_Rotation(t *testing.T) {
 	assert.Equal(t, 2, client.RotateCount(), "rotate count should reflect two switches")
 }
 
+// TestClient_Rotation_SorobanURLSync verifies that after a URL rotation both
+// HorizonURL and SorobanURL point to the newly selected node.  Before the
+// Protocol V2 standardization, rotateURL contained two dead SorobanURL
+// assignments (overwritten by a third) — this test pins the correct invariant.
+func TestClient_Rotation_SorobanURLSync(t *testing.T) {
+	urls := []string{"http://node1.example.com", "http://node2.example.com"}
+	client := NewClientWithURLsOption(urls, Testnet, "")
+
+	client.rotateURL()
+
+	assert.Equal(t, "http://node2.example.com", client.HorizonURL,
+		"HorizonURL should reflect the rotated node")
+	assert.Equal(t, client.HorizonURL, client.SorobanURL,
+		"SorobanURL must stay in sync with HorizonURL after rotation")
+}
+
 func TestClient_GetTransaction_Failover_Logic(t *testing.T) {
 	// This test verifies that GetTransaction calls rotateURL and retries
 	// We'll use a subclass to intercept rotateURL for testing if needed,

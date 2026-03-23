@@ -287,12 +287,6 @@ func (c *Client) rotateURL() bool {
 	}
 
 	c.HorizonURL = c.AltURLs[c.currIndex]
-	// Keep SorobanURL in sync with HorizonURL when they were previously identical
-	// so that health checks and Soroban RPC calls reflect the failover.
-	if c.SorobanURL != "" {
-		c.SorobanURL = c.HorizonURL
-	}
-	c.SorobanURL = c.HorizonURL
 	httpClient := c.httpClient
 	if httpClient == nil {
 		httpClient = createHTTPClient(c.token, defaultHTTPTimeout, c.middlewares...)
@@ -301,6 +295,8 @@ func (c *Client) rotateURL() bool {
 		HorizonURL: c.HorizonURL,
 		HTTP:       httpClient,
 	}
+	// Keep SorobanURL in sync with the newly selected node so that
+	// Soroban JSON-RPC calls use the same failover endpoint as Horizon.
 	c.SorobanURL = c.AltURLs[c.currIndex]
 
 	logger.Logger.Warn("RPC failover triggered", "new_url", c.HorizonURL)
@@ -340,7 +336,15 @@ func (c *Client) startMethodTimer(ctx context.Context, method string, attributes
 	return c.methodTelemetry.StartMethodTimer(ctx, method, attributes)
 }
 
-// createHTTPClient creates an HTTP client with optional authentication, a configurable timeout, and custom middlewares.
+// createHTTPClient creates an HTTP client with optional authentication, a configurable
+// timeout, and custom middlewares.
+//
+// Transport chain (innermost → outermost):
+//
+//	DefaultTransport → [authTransport] → RetryTransport → middleware[0] → … → middleware[n-1]
+//
+// Middlewares wrap the retry layer so each middleware sees only the final outcome of a
+// request (including retries), not individual retry attempts.
 func createHTTPClient(token string, timeout time.Duration, middlewares ...Middleware) *http.Client {
 	cfg := DefaultRetryConfig()
 
@@ -354,18 +358,10 @@ func createHTTPClient(token string, timeout time.Duration, middlewares ...Middle
 		}
 	}
 
-	// Apply custom middlewares before the retry transport if you want retries to apply to them,
-	// or after if you want them to wrap the retries.
-	// Usually middlewares wrap the transport.
-	for _, mw := range middlewares {
-		if mw != nil {
-			transport = mw(transport)
-		}
-	}
-
 	transport = NewRetryTransport(cfg, transport)
 
-	// Apply custom middlewares
+	// Each middleware wraps the transport exactly once. Applying them after
+	// RetryTransport means the middleware sees the resolved response (post-retries).
 	for _, mw := range middlewares {
 		if mw != nil {
 			transport = mw(transport)
