@@ -3,7 +3,6 @@
 
 // Package widgets provides reusable terminal UI panels for the hintents
 // interactive trace viewer.
-
 package widgets
 
 import (
@@ -62,7 +61,9 @@ type DiffEntry struct {
 
 // ComputeDiff produces the ordered list of DiffEntry values that describe
 // how HostState changed between prev and curr.
-
+//
+// When prev is nil (e.g. at step 0) all keys in curr are treated as DiffAdded.
+// When curr is nil all keys in prev are treated as DiffRemoved.
 func ComputeDiff(prev, curr *trace.ExecutionState) []DiffEntry {
 	var oldMap, newMap map[string]interface{}
 	if prev != nil {
@@ -144,6 +145,14 @@ func formatValue(v interface{}) string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // StatePanel is a resizable, scrollable three-column diff widget.
+//
+// It renders the delta of HostState between two consecutive ExecutionState
+// values, using colour to highlight additions (green), removals (red), and
+// modifications (yellow).
+//
+// Call SetStates whenever the user moves to a new step; call Lines() to
+// obtain the pre-rendered string slice that SplitLayout can zip into its
+// right pane.
 type StatePanel struct {
 	entries     []DiffEntry
 	scrollTop   int // first visible row index into entries
@@ -195,11 +204,20 @@ func (p *StatePanel) SelectedEntry() *DiffEntry {
 }
 
 // Lines renders the panel into a slice of strings, each exactly width columns
-// wide (padded or clipped). The first two lines are always the column headers
-// and a divider. maxRows controls the total number of lines returned (including
-// headers) so the caller can size the pane precisely.
+// wide (padded or clipped). Layout:
 //
-// Colour escape sequences are included unless p.noColor is true.
+//	line 0:         column headers (Key │ Old Value │ New Value)
+//	line 1:         divider
+//	lines 2..N-2:   data rows, colour-coded by DiffKind
+//	line N-1:       legend or scroll indicator
+//
+// Colour scheme (legible on both light and dark terminals):
+//
+//	DiffAdded:   indicator bold-green, new value bold-green
+//	DiffRemoved: indicator bold-red,   old value bold-red
+//	DiffChanged: indicator bold-yellow, old value dim-red, new value bold-green
+//	DiffSame:    entire row dim
+//	Selected:    indicator + key overridden to bold-cyan
 func (p *StatePanel) Lines(width, maxRows int) []string {
 	if width < 12 {
 		width = 12
@@ -207,9 +225,6 @@ func (p *StatePanel) Lines(width, maxRows int) []string {
 	lines := make([]string, maxRows)
 
 	// ── Column widths ────────────────────────────────────────────────────────
-	// Layout: [indicator][key][│][old][│][new]
-	// indicator = 2 chars ("+ ", "- ", "~ ", "  ")
-	// remainder split: key 30 %, old 35 %, new 35 %
 	indicatorW := 2
 	rest := width - indicatorW - 2 // two '│' separators
 	if rest < 9 {
@@ -227,12 +242,11 @@ func (p *StatePanel) Lines(width, maxRows int) []string {
 		newW, p.colorize("New Value", "bold"),
 	)
 	lines[0] = clip(header, width)
-
-	divider := strings.Repeat("─", width)
-	lines[1] = divider
+	lines[1] = strings.Repeat("─", width)
 
 	// ── Data rows ────────────────────────────────────────────────────────────
-	dataRows := maxRows - 2 // lines 2..maxRows-1
+	// Reserve the last line for the legend/scroll indicator.
+	dataRows := maxRows - 3 // header + divider + legend
 	if dataRows < 0 {
 		dataRows = 0
 	}
@@ -244,21 +258,21 @@ func (p *StatePanel) Lines(width, maxRows int) []string {
 			continue
 		}
 		e := p.entries[idx]
-		style := e.Kind.Style()
 
-		indicator := p.colorize(e.Kind.String()+" ", style)
-		key := p.colorize(truncate(e.Key, keyW), style)
-		oldVal := truncate(e.OldValue, oldW)
-		newVal := truncate(e.NewValue, newW)
+		// Per-column styles for this diff kind.
+		kindStyle := e.Kind.Style()          // indicator + key style
+		oldStyle, newStyle := e.Kind.valueStyles()
 
-		// Highlight the selected row with inverted style.
-		if idx == p.selectedRow {
-			indicator = p.colorize("▸ ", "cyan")
-			key = p.colorize(e.Key, "cyan")
-			if len(key) > keyW {
-				key = key[:keyW]
-			}
+		// Selected row overrides indicator and key to bold-cyan.
+		selected := idx == p.selectedRow
+		if selected {
+			kindStyle = "bold-cyan"
 		}
+
+		indicator := p.colorize(e.Kind.String()+" ", kindStyle)
+		key       := p.colorize(truncate(e.Key, keyW), kindStyle)
+		oldVal    := p.colorize(truncate(e.OldValue, oldW), oldStyle)
+		newVal    := p.colorize(truncate(e.NewValue, newW), newStyle)
 
 		line := fmt.Sprintf("%s%-*s│%-*s│%-*s",
 			indicator,
@@ -269,18 +283,28 @@ func (p *StatePanel) Lines(width, maxRows int) []string {
 		lines[row+2] = clip(line, width)
 	}
 
-	// ── Scroll indicator (overwrites last data row when needed) ──────────────
+	// Pad any unused data rows.
+	for row := dataRows; row > 0; row-- {
+		if idx := p.scrollTop + row - 1; idx >= len(p.entries) {
+			lines[row+1] = strings.Repeat(" ", width)
+		}
+	}
+
+	// ── Last line: scroll indicator or legend ─────────────────────────────
+	lastRow := maxRows - 1
 	if len(p.entries) > dataRows && dataRows > 0 {
 		total := len(p.entries)
 		end := p.scrollTop + dataRows
 		if end > total {
 			end = total
 		}
-		indicator := p.colorize(
-			fmt.Sprintf("  ─ %d–%d of %d entries ─", p.scrollTop+1, end, total),
+		scroll := p.colorize(
+			fmt.Sprintf("  ─ %d–%d of %d  ", p.scrollTop+1, end, total),
 			"dim",
 		)
-		lines[maxRows-1] = clip(indicator, width)
+		lines[lastRow] = clip(scroll+diffLegend(), width)
+	} else {
+		lines[lastRow] = clip(diffLegend(), width)
 	}
 
 	// ── Empty state ──────────────────────────────────────────────────────────
@@ -320,7 +344,42 @@ func (p *StatePanel) colorize(text, style string) string {
 	return Colorize(text, style)
 }
 
-// ── Internal helpers ──────────────────────────────────────────────────────────
+// diffLegend returns a compact legend line for the panel footer.
+// It mirrors ui.DiffLegend() but uses the local Colorize so the widgets
+// package does not need to import the parent ui package.
+func diffLegend() string {
+	return "Legend: " +
+		Colorize("[+]", "bold-green") + " added  " +
+		Colorize("[-]", "bold-red") + " removed  " +
+		Colorize("[~]", "bold-yellow") + " changed  " +
+		Colorize("[ ]", "dim") + " unchanged"
+}
+
+// valueStyles returns the ANSI style names to apply to the old-value and
+// new-value columns for a given DiffKind.
+//
+// Design rationale:
+//   - DiffAdded:   new value bold-green  (clearly new, nothing to compare)
+//   - DiffRemoved: old value bold-red    (clearly gone, nothing to compare)
+//   - DiffChanged: old value dim-red     (secondary — was), new bold-green (primary — now)
+//   - DiffSame:    both dim              (visually recedes, not a change)
+//
+// Bold variants ensure legibility on light-background terminals where plain
+// green/red can wash out against a pale background.
+func (d DiffKind) valueStyles() (oldStyle, newStyle string) {
+	switch d {
+	case DiffAdded:
+		return "", "bold-green"
+	case DiffRemoved:
+		return "bold-red", ""
+	case DiffChanged:
+		return "dim-red", "bold-green"
+	default: // DiffSame
+		return "dim", "dim"
+	}
+}
+
+
 
 // truncate clips s to at most n bytes, appending "…" when clipped.
 func truncate(s string, n int) string {
@@ -349,16 +408,35 @@ func clip(s string, n int) string {
 
 // Colorize is re-exported so the widgets package can be used without importing
 // the parent ui package, keeping the dependency graph acyclic.
+//
+// Supported style names match those in ui/styles.go:
+//
+//	Plain:      red, green, yellow, cyan, magenta, blue, white
+//	Intensity:  bold, dim
+//	Combined:   bold-red, bold-green, bold-yellow, bold-cyan
+//	            dim-red, dim-green
 func Colorize(text, style string) string {
 	const reset = "\033[0m"
 	codes := map[string]string{
-		"bold":    "\033[1m",
-		"dim":     "\033[2m",
+		// Plain colours
 		"red":     "\033[31m",
 		"green":   "\033[32m",
 		"yellow":  "\033[33m",
-		"cyan":    "\033[36m",
+		"blue":    "\033[34m",
 		"magenta": "\033[35m",
+		"cyan":    "\033[36m",
+		"white":   "\033[37m",
+		// Intensity
+		"bold": "\033[1m",
+		"dim":  "\033[2m",
+		// Bold + colour (high legibility on light and dark backgrounds)
+		"bold-red":    "\033[1;31m",
+		"bold-green":  "\033[1;32m",
+		"bold-yellow": "\033[1;33m",
+		"bold-cyan":   "\033[1;36m",
+		// Dim + colour ("before" / secondary values)
+		"dim-red":   "\033[2;31m",
+		"dim-green": "\033[2;32m",
 	}
 	code, ok := codes[style]
 	if !ok || style == "" {
