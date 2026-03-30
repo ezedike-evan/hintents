@@ -36,21 +36,24 @@ use std::time::Duration;
 
 /// Percentage of total execution time above which snapshot operations are
 /// considered slow.  Emits a `tracing::warn!` when exceeded.
+#[allow(dead_code)]
 pub const SLOW_THRESHOLD_PCT: f64 = 30.0;
 
 /// Per-operation timing sample set.
+#[allow(dead_code)]
 #[derive(Debug, Default, Clone)]
 struct OpStats {
-    count:    u64,
+    count: u64,
     total_ns: u64,
-    min_ns:   u64,
-    max_ns:   u64,
+    min_ns: u64,
+    max_ns: u64,
 }
 
+#[allow(dead_code)]
 impl OpStats {
     fn record(&mut self, d: Duration) {
         let ns = d.as_nanos() as u64;
-        self.count    += 1;
+        self.count += 1;
         self.total_ns += ns;
         if self.count == 1 || ns < self.min_ns {
             self.min_ns = ns;
@@ -79,13 +82,15 @@ impl OpStats {
 /// [`record_serialize`]: SnapshotMetrics::record_serialize
 /// [`emit_summary`]: SnapshotMetrics::emit_summary
 /// [`emit_summary_if_verbose`]: SnapshotMetrics::emit_summary_if_verbose
+#[allow(dead_code)]
 #[derive(Debug, Default, Clone)]
 pub struct SnapshotMetrics {
-    take:          OpStats,
-    serialize:     OpStats,
+    take: OpStats,
+    serialize: OpStats,
     total_exec_ns: u64,
 }
 
+#[allow(dead_code)]
 impl SnapshotMetrics {
     /// Creates a new, empty metrics collector.
     pub fn new() -> Self {
@@ -157,7 +162,7 @@ impl SnapshotMetrics {
                     pct = format!("{pct:.1}"),
                     threshold_pct = SLOW_THRESHOLD_PCT,
                     snapshot_ms = self.snapshot_total_ns() / 1_000_000,
-                    total_ms    = self.total_exec_ns / 1_000_000,
+                    total_ms = self.total_exec_ns / 1_000_000,
                     "Snapshotting consumed {pct:.1}% of total execution time \
                      (threshold: {SLOW_THRESHOLD_PCT}%). \
                      Consider reducing snapshot frequency or optimising XDR serialization."
@@ -178,7 +183,7 @@ impl SnapshotMetrics {
     pub fn summary(&self) -> String {
         let pct_str = match self.snapshot_pct() {
             Some(p) => format!("{p:.1}%"),
-            None    => "n/a (total execution time not set)".to_string(),
+            None => "n/a (total execution time not set)".to_string(),
         };
 
         let slow_tag = if self.is_slow() { " ⚠ SLOW" } else { "" };
@@ -221,6 +226,7 @@ impl SnapshotMetrics {
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 fn format_op(s: &OpStats) -> String {
     if s.count == 0 {
         return "  (no samples recorded)".to_string();
@@ -228,11 +234,11 @@ fn format_op(s: &OpStats) -> String {
     format!(
         "  count={count}  total={total_ms:.3}ms  \
          mean={mean_us:.1}µs  min={min_us:.1}µs  max={max_us:.1}µs",
-        count    = s.count,
+        count = s.count,
         total_ms = s.total_ns as f64 / 1_000_000.0,
-        mean_us  = s.mean_ns()   / 1_000.0,
-        min_us   = s.min_ns as f64 / 1_000.0,
-        max_us   = s.max_ns as f64 / 1_000.0,
+        mean_us = s.mean_ns() / 1_000.0,
+        min_us = s.min_ns as f64 / 1_000.0,
+        max_us = s.max_ns as f64 / 1_000.0,
     )
 }
 
@@ -275,7 +281,7 @@ mod tests {
     #[test]
     fn test_snapshot_total_ns() {
         let mut m = SnapshotMetrics::new();
-        m.record_take(dur_us(1_000));      // 1 ms
+        m.record_take(dur_us(1_000)); // 1 ms
         m.record_serialize(dur_us(2_000)); // 2 ms
         assert_eq!(m.snapshot_total_ns(), 3_000_000);
     }
@@ -283,7 +289,7 @@ mod tests {
     #[test]
     fn test_is_slow_below_threshold() {
         let mut m = SnapshotMetrics::new();
-        m.record_take(dur_us(10));  // 10 µs snapshot
+        m.record_take(dur_us(10)); // 10 µs snapshot
         m.set_total_execution(Duration::from_millis(100)); // 100 ms total → 0.01 %
         assert!(!m.is_slow());
     }
@@ -291,7 +297,7 @@ mod tests {
     #[test]
     fn test_is_slow_above_threshold() {
         let mut m = SnapshotMetrics::new();
-        m.record_take(Duration::from_millis(40));          // 40 ms snapshot
+        m.record_take(Duration::from_millis(40)); // 40 ms snapshot
         m.set_total_execution(Duration::from_millis(100)); // 100 ms total → 40 %
         assert!(m.is_slow());
     }

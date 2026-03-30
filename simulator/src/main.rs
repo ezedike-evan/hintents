@@ -8,7 +8,9 @@ mod debug_host_fn;
 mod gas_optimizer;
 mod git_detector;
 mod ipc;
+mod metrics;
 mod runner;
+mod snapshot;
 mod source_map_cache;
 mod source_mapper;
 mod stack_trace;
@@ -640,7 +642,6 @@ fn main() {
     }
 
     let diagnostic_events: Vec<DiagnosticEvent> = vec![];
-    let mut categorized_events: Vec<CategorizedEvent> = vec![];
 
     match result {
         Ok(Ok(exec_logs)) => {
@@ -694,7 +695,7 @@ fn main() {
                 ),
             };
 
-            categorized_events = match host.get_events() {
+            let categorized_events = match host.get_events() {
                 Ok(evs) => categorize_events(&evs),
                 Err(_) => vec![],
             };

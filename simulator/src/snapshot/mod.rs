@@ -58,11 +58,9 @@ impl LedgerSnapshot {
         let mut out = HashMap::new();
 
         for (key_bytes, entry) in self.iter() {
-            let entry_bytes = entry
-                .to_xdr(Limits::none())
-                .map_err(|e| {
-                    SnapshotError::XdrEncoding(format!("Failed to encode ledger entry: {e}"))
-                })?;
+            let entry_bytes = entry.to_xdr(Limits::none()).map_err(|e| {
+                SnapshotError::XdrEncoding(format!("Failed to encode ledger entry: {e}"))
+            })?;
 
             out.insert(STANDARD.encode(key_bytes), STANDARD.encode(&entry_bytes));
         }
@@ -177,7 +175,11 @@ pub fn diff_snapshots(before: &LedgerSnapshot, after: &LedgerSnapshot) -> StateD
     modified.sort_unstable();
     deleted.sort_unstable();
 
-    StateDiff { inserted, modified, deleted }
+    StateDiff {
+        inserted,
+        modified,
+        deleted,
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -249,7 +251,11 @@ pub struct LoadStats {
 impl LoadStats {
     #[allow(dead_code)]
     pub fn new(loaded: usize, failed: usize, total: usize) -> Self {
-        Self { loaded_count: loaded, failed_count: failed, total_count: total }
+        Self {
+            loaded_count: loaded,
+            failed_count: failed,
+            total_count: total,
+        }
     }
 
     #[allow(dead_code)]
@@ -292,7 +298,8 @@ mod tests {
     #[test]
     fn test_serialize_roundtrip_empty_snapshot() {
         let snapshot = LedgerSnapshot::new();
-        let serialized = snapshot.serialize_to_base64_map()
+        let serialized = snapshot
+            .serialize_to_base64_map()
             .expect("Serialization of empty snapshot should succeed");
         assert!(serialized.is_empty());
     }
@@ -301,18 +308,27 @@ mod tests {
     fn test_decode_invalid_base64() {
         let result = decode_ledger_key("not-valid-base64!!!");
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), SnapshotError::Base64Decode(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            SnapshotError::Base64Decode(_)
+        ));
     }
 
     #[test]
     fn test_decode_empty_payloads() {
         let key_result = decode_ledger_key("");
         assert!(key_result.is_err());
-        assert!(matches!(key_result.unwrap_err(), SnapshotError::Base64Decode(_)));
+        assert!(matches!(
+            key_result.unwrap_err(),
+            SnapshotError::Base64Decode(_)
+        ));
 
         let entry_result = decode_ledger_entry("");
         assert!(entry_result.is_err());
-        assert!(matches!(entry_result.unwrap_err(), SnapshotError::Base64Decode(_)));
+        assert!(matches!(
+            entry_result.unwrap_err(),
+            SnapshotError::Base64Decode(_)
+        ));
     }
 
     #[test]
@@ -322,7 +338,10 @@ mod tests {
 
         let result = LedgerSnapshot::from_base64_map(&entries);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), SnapshotError::Base64Decode(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            SnapshotError::Base64Decode(_)
+        ));
     }
 
     #[test]

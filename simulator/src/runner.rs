@@ -18,6 +18,7 @@ pub struct SimHost {
     /// Events buffered since the last call to `_drain_events_for_snapshot`.
     _pending_events: Vec<String>,
     /// Snapshot serialization latency collector for this run.
+    #[allow(dead_code)]
     pub metrics: SnapshotMetrics,
 }
 
@@ -92,6 +93,7 @@ impl SimHost {
     ///
     /// # Errors
     /// Propagates [`SnapshotError`] on XDR decode failure.
+    #[allow(dead_code)]
     pub fn timed_take_snapshot(
         &mut self,
         entries: &std::collections::HashMap<String, String>,
@@ -107,6 +109,7 @@ impl SimHost {
     ///
     /// # Errors
     /// Propagates [`SnapshotError`] on XDR encode failure.
+    #[allow(dead_code)]
     pub fn timed_serialize_snapshot(
         &mut self,
         snap: &LedgerSnapshot,
@@ -125,6 +128,7 @@ impl SimHost {
     /// ```rust,ignore
     /// host.finish_metrics(total_start.elapsed(), args.verbose || args.profile);
     /// ```
+    #[allow(dead_code)]
     pub fn finish_metrics(&mut self, total: std::time::Duration, verbose: bool) {
         self.metrics.set_total_execution(total);
         self.metrics.emit_summary_if_verbose(verbose);
@@ -202,10 +206,14 @@ mod tests {
     fn test_timed_take_snapshot_empty_entries() {
         let mut host = SimHost::new(None, None, None);
         let entries = std::collections::HashMap::new();
-        let snap = host.timed_take_snapshot(&entries)
+        let snap = host
+            .timed_take_snapshot(&entries)
             .expect("take_snapshot of empty map should succeed");
         assert!(snap.is_empty());
         // One sample should have been recorded
-        assert_eq!(host.metrics.snapshot_total_ns(), 0u64.max(host.metrics.snapshot_total_ns()));
+        assert_eq!(
+            host.metrics.snapshot_total_ns(),
+            0u64.max(host.metrics.snapshot_total_ns())
+        );
     }
 }
