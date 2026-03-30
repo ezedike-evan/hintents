@@ -260,7 +260,7 @@ func (p *StatePanel) Lines(width, maxRows int) []string {
 		e := p.entries[idx]
 
 		// Per-column styles for this diff kind.
-		kindStyle := e.Kind.Style()          // indicator + key style
+		kindStyle := e.Kind.Style() // indicator + key style
 		oldStyle, newStyle := e.Kind.valueStyles()
 
 		// Selected row overrides indicator and key to bold-cyan.
@@ -270,9 +270,9 @@ func (p *StatePanel) Lines(width, maxRows int) []string {
 		}
 
 		indicator := p.colorize(e.Kind.String()+" ", kindStyle)
-		key       := p.colorize(truncate(e.Key, keyW), kindStyle)
-		oldVal    := p.colorize(truncate(e.OldValue, oldW), oldStyle)
-		newVal    := p.colorize(truncate(e.NewValue, newW), newStyle)
+		key := p.colorize(truncate(e.Key, keyW), kindStyle)
+		oldVal := p.colorize(truncate(e.OldValue, oldW), oldStyle)
+		newVal := p.colorize(truncate(e.NewValue, newW), newStyle)
 
 		line := fmt.Sprintf("%s%-*s│%-*s│%-*s",
 			indicator,
@@ -378,8 +378,6 @@ func (d DiffKind) valueStyles() (oldStyle, newStyle string) {
 		return "dim", "dim"
 	}
 }
-
-
 
 // truncate clips s to at most n bytes, appending "…" when clipped.
 func truncate(s string, n int) string {

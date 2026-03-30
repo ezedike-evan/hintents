@@ -8,11 +8,17 @@ use soroban_env_host::{
     DiagnosticLevel, Error as EnvError, Host, HostError, TryIntoVal, Val,
 };
 
+use crate::metrics::SnapshotMetrics;
+use crate::snapshot::{LedgerSnapshot, SnapshotError};
+use std::time::Instant;
+
 /// Wrapper around the Soroban Host to manage initialization and execution context.
 pub struct SimHost {
     pub inner: Host,
     /// Events buffered since the last call to `_drain_events_for_snapshot`.
     _pending_events: Vec<String>,
+    /// Snapshot serialization latency collector for this run.
+    pub metrics: SnapshotMetrics,
 }
 
 impl SimHost {
@@ -45,6 +51,7 @@ impl SimHost {
         Self {
             inner: host,
             _pending_events: Vec::new(),
+            metrics: SnapshotMetrics::new(),
         }
     }
 
@@ -69,21 +76,58 @@ impl SimHost {
     }
 
     /// Buffer a contract event for inclusion in the next snapshot.
-    ///
-    /// Call this from the simulation loop each time an event is emitted so that
-    /// `_drain_events_for_snapshot` can associate the right events with each
-    /// snapshot window.
     pub fn _push_event(&mut self, event: String) {
         self._pending_events.push(event);
     }
 
     /// Return all events buffered since the last snapshot and clear the buffer.
-    ///
-    /// The returned `Vec` is moved into the `events` field of the `StateSnapshot`
-    /// being constructed.  After this call the buffer is empty and ready for the
-    /// next snapshot window.
     pub fn _drain_events_for_snapshot(&mut self) -> Vec<String> {
         std::mem::take(&mut self._pending_events)
+    }
+
+    // ── Timed snapshot methods ────────────────────────────────────────────────
+
+    /// Load a ledger snapshot from base64-encoded XDR entries, recording the
+    /// wall-clock duration in `self.metrics` as a `take_snapshot` sample.
+    ///
+    /// # Errors
+    /// Propagates [`SnapshotError`] on XDR decode failure.
+    pub fn timed_take_snapshot(
+        &mut self,
+        entries: &std::collections::HashMap<String, String>,
+    ) -> Result<LedgerSnapshot, SnapshotError> {
+        let start = Instant::now();
+        let snap = LedgerSnapshot::from_base64_map(entries)?;
+        self.metrics.record_take(start.elapsed());
+        Ok(snap)
+    }
+
+    /// Serialize a ledger snapshot back to base64-encoded XDR, recording the
+    /// wall-clock duration in `self.metrics` as a `serialize_snapshot` sample.
+    ///
+    /// # Errors
+    /// Propagates [`SnapshotError`] on XDR encode failure.
+    pub fn timed_serialize_snapshot(
+        &mut self,
+        snap: &LedgerSnapshot,
+    ) -> Result<std::collections::HashMap<String, String>, SnapshotError> {
+        let start = Instant::now();
+        let result = snap.serialize_to_base64_map()?;
+        self.metrics.record_serialize(start.elapsed());
+        Ok(result)
+    }
+
+    /// Finalise metrics with the total execution duration and emit the summary
+    /// if verbose/profile mode is on.
+    ///
+    /// Call this once at the end of each simulation run:
+    ///
+    /// ```rust,ignore
+    /// host.finish_metrics(total_start.elapsed(), args.verbose || args.profile);
+    /// ```
+    pub fn finish_metrics(&mut self, total: std::time::Duration, verbose: bool) {
+        self.metrics.set_total_execution(total);
+        self.metrics.emit_summary_if_verbose(verbose);
     }
 }
 
@@ -94,17 +138,14 @@ mod tests {
     #[test]
     fn test_host_initialization() {
         let host = SimHost::new(None, None, None);
-        // Basic assertion that host is functional
         assert!(host.inner.budget_cloned().get_cpu_insns_consumed().is_ok());
     }
 
     #[test]
     fn test_configuration() {
         let mut host = SimHost::new(None, None, None);
-        // Test setting contract ID (dummy hash)
         let hash = Hash([0u8; 32]);
         host._set_contract_id(hash);
-
         host._set_fn_name("add")
             .expect("failed to set function name");
     }
@@ -147,5 +188,24 @@ mod tests {
         let mut host = SimHost::new(None, None, None);
         let drained = host._drain_events_for_snapshot();
         assert!(drained.is_empty());
+    }
+
+    #[test]
+    fn test_metrics_initialised_empty() {
+        let host = SimHost::new(None, None, None);
+        // Fresh host should have no samples and not be slow
+        assert!(!host.metrics.is_slow());
+        assert!(host.metrics.snapshot_pct().is_none());
+    }
+
+    #[test]
+    fn test_timed_take_snapshot_empty_entries() {
+        let mut host = SimHost::new(None, None, None);
+        let entries = std::collections::HashMap::new();
+        let snap = host.timed_take_snapshot(&entries)
+            .expect("take_snapshot of empty map should succeed");
+        assert!(snap.is_empty());
+        // One sample should have been recorded
+        assert_eq!(host.metrics.snapshot_total_ns(), 0u64.max(host.metrics.snapshot_total_ns()));
     }
 }
