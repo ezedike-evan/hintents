@@ -15,18 +15,22 @@ import (
 type Pane int
 
 const (
-	// PaneTrace is the left pane showing the execution trace tree.
 	PaneTrace Pane = iota
-	// PaneState is the right pane showing the state key-value table.
 	PaneState
+	PaneDiff
 )
 
-// String returns a display label for the pane.
 func (p Pane) String() string {
-	if p == PaneTrace {
+	switch p {
+	case PaneTrace:
 		return "Trace"
+	case PaneState:
+		return "State"
+	case PaneDiff:
+		return "Diff"
+	default:
+		return "?"
 	}
-	return "State"
 }
 
 type SplitLayout struct {
@@ -34,9 +38,13 @@ type SplitLayout struct {
 	Height int
 	Focus Pane
 
-	LeftTitle  string
-	RightTitle string
+	LeftTitle   string
+	MiddleTitle string
+	RightTitle  string
+
 	SplitRatio float64
+
+	ShowDiff bool
 
 	resizeCh chan struct{}
 }
@@ -45,38 +53,50 @@ type SplitLayout struct {
 func NewSplitLayout() *SplitLayout {
 	w, h := TermSize()
 	return &SplitLayout{
-		Width:      w,
-		Height:     h,
-		Focus:      PaneTrace,
-		LeftTitle:  "Trace",
-		RightTitle: "State",
-		SplitRatio: 0.5,
-		resizeCh:   make(chan struct{}, 1),
+		Width:       w,
+		Height:      h,
+		Focus:       PaneTrace,
+		LeftTitle:   "Trace",
+		MiddleTitle: "State",
+		RightTitle:  "Diff",
+		SplitRatio:  0.4,
+		resizeCh:    make(chan struct{}, 1),
 	}
 }
 
-// ToggleFocus switches keyboard focus to the other pane and returns the new
-// active pane. This is the action bound to the Tab key.
 func (l *SplitLayout) ToggleFocus() Pane {
-	if l.Focus == PaneTrace {
+	switch l.Focus {
+	case PaneTrace:
 		l.Focus = PaneState
-	} else {
+	case PaneState:
+		if l.ShowDiff {
+			l.Focus = PaneDiff
+		} else {
+			l.Focus = PaneTrace
+		}
+	default: // PaneDiff
 		l.Focus = PaneTrace
 	}
 	return l.Focus
 }
 
-// SetFocus moves focus to the specified pane.
 func (l *SplitLayout) SetFocus(p Pane) {
 	l.Focus = p
 }
 
-// LeftWidth returns the number of columns allocated to the left (trace) pane,
-// excluding the centre divider character.
+func (l *SplitLayout) ToggleDiff() bool {
+	l.ShowDiff = !l.ShowDiff
+	if !l.ShowDiff && l.Focus == PaneDiff {
+		l.Focus = PaneState
+	}
+	return l.ShowDiff
+}
+
+// LeftWidth returns the number of columns for the trace (leftmost) pane.
 func (l *SplitLayout) LeftWidth() int {
 	ratio := l.SplitRatio
 	if ratio <= 0 || ratio >= 1 {
-		ratio = 0.5
+		ratio = 0.4
 	}
 	w := int(float64(l.Width) * ratio)
 	if w < 10 {
@@ -85,9 +105,30 @@ func (l *SplitLayout) LeftWidth() int {
 	return w
 }
 
-// RightWidth returns the number of columns allocated to the right (state) pane.
+func (l *SplitLayout) MiddleWidth() int {
+	remaining := l.Width - l.LeftWidth() - 1 // –1 for left│middle divider
+	if !l.ShowDiff {
+		return remaining
+	}
+	w := remaining / 2
+	if w < 8 {
+		w = 8
+	}
+	return w
+}
+
+// RightWidth returns the number of columns for the diff pane.
+// Returns 0 when ShowDiff is false.
 func (l *SplitLayout) RightWidth() int {
-	return l.Width - l.LeftWidth() - 1 // –1 for the divider
+	if !l.ShowDiff {
+		return 0
+	}
+	remaining := l.Width - l.LeftWidth() - 1
+	rw := remaining - l.MiddleWidth() - 1 // –1 for middle│right divider
+	if rw < 0 {
+		rw = 0
+	}
+	return rw
 }
 
 func (l *SplitLayout) ListenResize() <-chan struct{} {
@@ -111,9 +152,11 @@ func (l *SplitLayout) ListenResize() <-chan struct{} {
 	return l.resizeCh
 }
 
-func (l *SplitLayout) Render(leftLines, rightLines []string) {
+func (l *SplitLayout) Render(leftLines, middleLines, rightLines []string) {
 	lw := l.LeftWidth()
+	mw := l.MiddleWidth()
 	rw := l.RightWidth()
+
 	contentRows := l.Height - 3
 	if contentRows < 1 {
 		contentRows = 1
@@ -122,29 +165,37 @@ func (l *SplitLayout) Render(leftLines, rightLines []string) {
 	sb := &strings.Builder{}
 
 	// ── Top border ────────────────────────────────────────────────────────────
-	sb.WriteString(l.borderRow(lw, rw))
+	sb.WriteString(l.borderRow(lw, mw, rw))
 	sb.WriteByte('\n')
 
 	// ── Content rows ─────────────────────────────────────────────────────────
 	for row := 0; row < contentRows; row++ {
-		leftCell := cellAt(leftLines, row, lw)
-		rightCell := cellAt(rightLines, row, rw)
-
-		sb.WriteString(l.panePrefix(PaneTrace))
-		sb.WriteString(leftCell)
-		sb.WriteString(l.divider())
-		sb.WriteString(l.panePrefix(PaneState))
-		sb.WriteString(rightCell)
+		sb.WriteString(cellAt(leftLines, row, lw))
+		sb.WriteString("│")
+		sb.WriteString(cellAt(middleLines, row, mw))
+		if l.ShowDiff && rw > 0 {
+			sb.WriteString("│")
+			sb.WriteString(cellAt(rightLines, row, rw))
+		}
 		sb.WriteByte('\n')
 	}
 
 	// ── Bottom border ────────────────────────────────────────────────────────
-	bottom := "+" + strings.Repeat("-", lw) + "+" + strings.Repeat("-", rw) + "+"
+	bottom := "+" + strings.Repeat("─", lw) + "+" + strings.Repeat("─", mw) + "+"
+	if l.ShowDiff && rw > 0 {
+		bottom += strings.Repeat("─", rw) + "+"
+	}
 	sb.WriteString(bottom)
 	sb.WriteByte('\n')
 
 	// ── Status bar ───────────────────────────────────────────────────────────
-	status := fmt.Sprintf(" [focus: %s]  %s", l.Focus, KeyHelp())
+	help := KeyHelp()
+	if l.ShowDiff {
+		help += "  d:hide-diff"
+	} else {
+		help += "  d:show-diff"
+	}
+	status := fmt.Sprintf(" [focus: %s]  %s", l.Focus, help)
 	if len(status) > l.Width {
 		status = status[:l.Width]
 	}
@@ -153,13 +204,16 @@ func (l *SplitLayout) Render(leftLines, rightLines []string) {
 	fmt.Print(sb.String())
 }
 
-// borderRow builds the top border string with centred pane titles.
-//
-//	+──── Trace ─────+──── State ─────+
-func (l *SplitLayout) borderRow(lw, rw int) string {
-	leftLabel := l.fmtTitle(l.LeftTitle, l.Focus == PaneTrace, lw)
-	rightLabel := l.fmtTitle(l.RightTitle, l.Focus == PaneState, rw)
-	return "+" + leftLabel + "+" + rightLabel + "+"
+// borderRow builds the top border with centred pane titles.
+func (l *SplitLayout) borderRow(lw, mw, rw int) string {
+	left := l.fmtTitle(l.LeftTitle, l.Focus == PaneTrace, lw)
+	middle := l.fmtTitle(l.MiddleTitle, l.Focus == PaneState, mw)
+	top := "+" + left + "+" + middle + "+"
+	if l.ShowDiff && rw > 0 {
+		right := l.fmtTitle(l.RightTitle, l.Focus == PaneDiff, rw)
+		top += right + "+"
+	}
+	return top
 }
 
 func (l *SplitLayout) fmtTitle(title string, focused bool, width int) string {
@@ -177,15 +231,9 @@ func (l *SplitLayout) fmtTitle(title string, focused bool, width int) string {
 	return strings.Repeat("─", left) + label + strings.Repeat("─", right)
 }
 
-func (l *SplitLayout) divider() string {
-	return "│"
-}
 
-// panePrefix is a hook for future per-pane colouring (currently a no-op).
-func (l *SplitLayout) panePrefix(_ Pane) string {
-	return ""
-}
-
+// cellAt returns the display text for a specific row in a pane, padded or
+// clipped to exactly width columns.
 func cellAt(lines []string, row, width int) string {
 	text := ""
 	if row < len(lines) {

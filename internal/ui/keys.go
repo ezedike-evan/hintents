@@ -9,6 +9,7 @@ import (
 	"os"
 )
 
+// Key represents a normalised keyboard event.
 type Key int
 
 const (
@@ -22,6 +23,7 @@ const (
 	KeyQuit
 	KeySlash
 	KeyEscape
+	KeyDiff
 )
 
 func (k Key) String() string {
@@ -49,7 +51,6 @@ func (k Key) String() string {
 	}
 }
 
-// KeyHelp returns a compact one-line help string for the status bar.
 func KeyHelp() string {
 	return "Tab:switch-pane  ↑↓:navigate  Enter:expand  q:quit  /:search"
 }
@@ -58,7 +59,6 @@ type KeyReader struct {
 	r *bufio.Reader
 }
 
-// NewKeyReader creates a KeyReader reading from os.Stdin.
 func NewKeyReader() *KeyReader {
 	return &KeyReader{r: bufio.NewReader(os.Stdin)}
 }
@@ -70,12 +70,14 @@ func (kr *KeyReader) Read() (Key, error) {
 	}
 
 	switch b {
-	case '\t': // ASCII 0x09
+	case '\t':
 		return KeyTab, nil
-	case '\r', '\n': // CR / LF
+	case '\r', '\n':
 		return KeyEnter, nil
 	case 'q', 'Q':
 		return KeyQuit, nil
+	case 'd', 'D':
+		return KeyDiff, nil
 	case 'k':
 		return KeyUp, nil
 	case 'j':
@@ -86,25 +88,23 @@ func (kr *KeyReader) Read() (Key, error) {
 		return KeyRight, nil
 	case '/':
 		return KeySlash, nil
-	case 0x1b: // ESC — may be start of an ANSI escape sequence
+	case 0x1b:
 		return kr.readEscape()
-	case 0x03: // Ctrl-C
+	case 0x03:
 		return KeyQuit, nil
 	}
 	return KeyUnknown, nil
 }
 
-// readEscape parses ANSI CSI sequences after the leading ESC byte.
 func (kr *KeyReader) readEscape() (Key, error) {
 	next, err := kr.r.ReadByte()
 	if err != nil {
-		return KeyEscape, nil // bare Esc
+		return KeyEscape, nil
 	}
 	if next != '[' {
-		return KeyEscape, nil // ESC not followed by '[' — treat as Esc
+		return KeyEscape, nil
 	}
 
-	// Read CSI parameter bytes until a final byte in 0x40–0x7E
 	var seq []byte
 	for {
 		c, err := kr.r.ReadByte()
@@ -135,6 +135,9 @@ func (kr *KeyReader) readEscape() (Key, error) {
 	return KeyUnknown, nil
 }
 
+// TermSize returns the current terminal dimensions. It reads $COLUMNS and
+// $LINES first, falling back to 80×24 when neither is set. The split-screen
+// layout calls this on every resize signal to reflow the panes.
 func TermSize() (width, height int) {
 	width = readEnvInt("COLUMNS", 80)
 	height = readEnvInt("LINES", 24)

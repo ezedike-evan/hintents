@@ -8,55 +8,39 @@ import (
 	"strings"
 
 	"github.com/dotandev/hintents/internal/trace"
+	"github.com/dotandev/hintents/internal/ui/widgets"
 )
 
-// StateRow is a single key-value pair shown in the right pane.
 type StateRow struct {
 	Key   string
 	Value string
 }
 
-// TraceView is the split-screen controller that wires a trace.TreeRenderer
-// (left pane) to a state table (right pane).
-//
-// Typical lifecycle:
-//
-//	tv := ui.NewTraceView(root)
-//	layout := ui.NewSplitLayout()
-//	resize := layout.ListenResize()
-//	kr := ui.NewKeyReader()
-//
-//	for {
-//	    tv.Render(layout)
-//	    key, _ := kr.Read()
-//	    if done := tv.HandleKey(key, layout); done { break }
-//	    select {
-//	    case <-resize:
-//	        tv.Resize(layout.Width, layout.Height)
-//	    default:
-//	    }
-//	}
 type TraceView struct {
-	tree       *trace.TreeRenderer
-	stateRows  []StateRow
+	tree        *trace.TreeRenderer
+	etrace      *trace.ExecutionTrace
+	stateRows   []StateRow
 	stateScroll int
-	stateSel   int
+	stateSel    int
+	diffPanel   *widgets.StatePanel
 }
 
-func NewTraceView(root *trace.TraceNode) *TraceView {
+func NewTraceView(root *trace.TraceNode, etrace *trace.ExecutionTrace) *TraceView {
 	w, h := TermSize()
 	tv := &TraceView{
-		tree: trace.NewTreeRenderer(w/2, h-3),
+		tree:      trace.NewTreeRenderer(w/2, h-3),
+		etrace:    etrace,
+		diffPanel: widgets.NewStatePanel(),
 	}
 	tv.tree.RenderTree(root)
 	tv.refreshState()
+	tv.refreshDiff()
 	return tv
 }
 
 func (tv *TraceView) Resize(w, h int) {
 	tv.tree = trace.NewTreeRenderer(w/2, h-3)
 }
-
 func (tv *TraceView) HandleKey(k Key, layout *SplitLayout) (done bool) {
 	switch k {
 	case KeyQuit:
@@ -69,22 +53,37 @@ func (tv *TraceView) HandleKey(k Key, layout *SplitLayout) (done bool) {
 		layout.SetFocus(PaneTrace)
 
 	case KeyRight:
-		layout.SetFocus(PaneState)
+		if layout.ShowDiff {
+			layout.SetFocus(PaneDiff)
+		} else {
+			layout.SetFocus(PaneState)
+		}
 
+	case KeyDiff:
+		layout.ToggleDiff()
 	case KeyUp:
-		if layout.Focus == PaneTrace {
+		switch layout.Focus {
+		case PaneTrace:
 			tv.tree.SelectUp()
 			tv.refreshState()
-		} else {
+			tv.refreshDiff()
+		case PaneState:
 			tv.stateScrollUp()
+		case PaneDiff:
+			tv.diffPanel.SelectUp()
 		}
 
 	case KeyDown:
-		if layout.Focus == PaneTrace {
+		contentRows := layout.Height - 3
+		switch layout.Focus {
+		case PaneTrace:
 			tv.tree.SelectDown()
 			tv.refreshState()
-		} else {
+			tv.refreshDiff()
+		case PaneState:
 			tv.stateScrollDown()
+		case PaneDiff:
+			tv.diffPanel.SelectDown(contentRows - 2)
 		}
 
 	case KeyEnter:
@@ -94,6 +93,7 @@ func (tv *TraceView) HandleKey(k Key, layout *SplitLayout) (done bool) {
 				root := treeRoot(node)
 				tv.tree.RenderTree(root)
 				tv.refreshState()
+				tv.refreshDiff()
 			}
 		}
 	}
@@ -101,15 +101,43 @@ func (tv *TraceView) HandleKey(k Key, layout *SplitLayout) (done bool) {
 	return false
 }
 
+// Render draws the complete split-screen frame using layout for dimensions
+// and focus state.
 func (tv *TraceView) Render(layout *SplitLayout) {
 	lw := layout.LeftWidth()
+	mw := layout.MiddleWidth()
 	rw := layout.RightWidth()
 	contentRows := layout.Height - 3
+	if contentRows < 1 {
+		contentRows = 1
+	}
 
 	leftLines := tv.renderTraceLines(lw, contentRows)
-	rightLines := tv.renderStateLines(rw, contentRows)
+	middleLines := tv.renderStateLines(mw, contentRows)
+	var rightLines []string
+	if layout.ShowDiff {
+		rightLines = tv.diffPanel.Lines(rw, contentRows)
+	}
 
-	layout.Render(leftLines, rightLines)
+	layout.Render(leftLines, middleLines, rightLines)
+}
+
+// refreshDiff updates the diff panel from the ExecutionTrace at the current step.
+func (tv *TraceView) refreshDiff() {
+	if tv.etrace == nil || tv.diffPanel == nil {
+		return
+	}
+	step := tv.etrace.CurrentStep
+	var prev, curr *trace.ExecutionState
+	if step >= 0 && step < len(tv.etrace.States) {
+		s := tv.etrace.States[step]
+		curr = &s
+	}
+	if step > 0 && step-1 < len(tv.etrace.States) {
+		s := tv.etrace.States[step-1]
+		prev = &s
+	}
+	tv.diffPanel.SetStates(prev, curr)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
