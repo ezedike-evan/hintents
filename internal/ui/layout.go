@@ -36,7 +36,7 @@ func (p Pane) String() string {
 type SplitLayout struct {
 	Width  int
 	Height int
-	Focus Pane
+	Focus  Pane
 
 	LeftTitle   string
 	MiddleTitle string
@@ -230,7 +230,6 @@ func (l *SplitLayout) fmtTitle(title string, focused bool, width int) string {
 	right := pad - left
 	return strings.Repeat("─", left) + label + strings.Repeat("─", right)
 }
-
 
 // cellAt returns the display text for a specific row in a pane, padded or
 // clipped to exactly width columns.
