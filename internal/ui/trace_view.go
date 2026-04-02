@@ -18,11 +18,9 @@ type StateRow struct {
 
 type TraceView struct {
 	tree        *trace.TreeRenderer
-	etrace      *trace.ExecutionTrace
 	stateRows   []StateRow
 	stateScroll int
 	stateSel    int
-	diffPanel   *widgets.StatePanel
 }
 
 func NewTraceView(root *trace.TraceNode, etrace *trace.ExecutionTrace) *TraceView {
