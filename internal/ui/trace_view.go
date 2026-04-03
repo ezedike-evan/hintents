@@ -18,6 +18,8 @@ type StateRow struct {
 
 type TraceView struct {
 	tree        *trace.TreeRenderer
+	etrace      *trace.ExecutionTrace
+	diffPanel   *widgets.StatePanel
 	stateRows   []StateRow
 	stateScroll int
 	stateSel    int

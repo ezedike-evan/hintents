@@ -41,9 +41,12 @@ func (p Pane) String() string {
 }
 
 type SplitLayout struct {
-	Width  int
-	Height int
-	Focus  Pane
+	Width       int
+	Height      int
+	Focus       Pane
+	LeftTitle   string
+	MiddleTitle string
+	RightTitle  string
 
 	SplitRatio float64
 
@@ -82,6 +85,10 @@ func (l *SplitLayout) ToggleFocus() Pane {
 	return l.Focus
 }
 
+func (sl *SplitLayout) ToggleDiff() {
+	sl.ShowDiff = !sl.ShowDiff
+}
+
 func (l *SplitLayout) SetFocus(p Pane) {
 	l.Focus = p
 }
@@ -98,8 +105,34 @@ func (l *SplitLayout) LeftWidth() int {
 	return w
 }
 
+// MiddleWidth returns the width of the centre pane.
+// When ShowDiff is false it takes all space to the right of the left pane.
+// When ShowDiff is true the remaining space is split evenly with the right pane.
+func (l *SplitLayout) MiddleWidth() int {
+	remaining := l.Width - l.LeftWidth() - 1 // left pane + one divider
+	if !l.ShowDiff {
+		return remaining
+	}
+	// Reserve space for the second divider and split the rest with the right pane.
+	mw := (remaining - 1) / 2
+	if mw < 10 {
+		mw = 10
+	}
+	return mw
+}
+
+// RightWidth returns the width of the right (diff) pane.
+// Returns 0 when ShowDiff is false.
 func (l *SplitLayout) RightWidth() int {
-	return l.Width - l.LeftWidth() - 1
+	if !l.ShowDiff {
+		return 0
+	}
+	// Width minus left pane, middle pane, and two dividers.
+	rw := l.Width - l.LeftWidth() - l.MiddleWidth() - 2
+	if rw < 0 {
+		rw = 0
+	}
+	return rw
 }
 
 // ListenResize starts a goroutine that updates Width/Height whenever the
@@ -143,7 +176,7 @@ func (l *SplitLayout) Render(leftLines, middleLines, rightLines []string) {
 
 	sb := &strings.Builder{}
 
-	sb.WriteString(l.borderRow(lw, rw))
+	sb.WriteString(l.borderRow(lw, mw, rw))
 	sb.WriteByte('\n')
 
 	for row := 0; row < contentRows; row++ {
@@ -157,7 +190,10 @@ func (l *SplitLayout) Render(leftLines, middleLines, rightLines []string) {
 		sb.WriteByte('\n')
 	}
 
-	bottom := "+" + strings.Repeat("-", lw) + "+" + strings.Repeat("-", rw) + "+"
+	bottom := "+" + strings.Repeat("-", lw) + "+" + strings.Repeat("-", mw) + "+"
+	if l.ShowDiff && rw > 0 {
+		bottom += strings.Repeat("-", rw) + "+"
+	}
 	sb.WriteString(bottom)
 	sb.WriteByte('\n')
 
@@ -170,10 +206,15 @@ func (l *SplitLayout) Render(leftLines, middleLines, rightLines []string) {
 	fmt.Print(sb.String())
 }
 
-func (l *SplitLayout) borderRow(lw, rw int) string {
+func (l *SplitLayout) borderRow(lw, mw, rw int) string {
 	leftLabel := l.fmtTitle(l.LeftTitle, l.Focus == PaneTrace, lw)
-	rightLabel := l.fmtTitle(l.RightTitle, l.Focus == PaneState, rw)
-	return "+" + leftLabel + "+" + rightLabel + "+"
+	middleLabel := l.fmtTitle(l.MiddleTitle, l.Focus == PaneState, mw)
+	row := "+" + leftLabel + "+" + middleLabel + "+"
+	if l.ShowDiff && rw > 0 {
+		rightLabel := l.fmtTitle(l.RightTitle, l.Focus == PaneDiff, rw)
+		row += rightLabel + "+"
+	}
+	return row
 }
 
 func (l *SplitLayout) fmtTitle(title string, focused bool, width int) string {
